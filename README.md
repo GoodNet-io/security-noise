@@ -31,12 +31,12 @@ cmake --build build
 
 Manifest entry pins the SHA-256 digest; `gn_plugin_init` registers
 the `noise` provider. See `docs/install.md` and
-`docs/contracts/plugin-manifest.md` in the kernel tree.
+`docs/contracts/plugin-manifest.en.md` in the kernel tree.
 
 ## Contract
 
 - Wire format + handshake spec: [`docs/handshake.md`](docs/handshake.md)
-- Kernel-side trust-class policy: `docs/contracts/security-trust.md`
+- Kernel-side trust-class policy: `docs/contracts/security-trust.en.md`
 - Pattern: Noise XX (mutual auth, no preshared peer pk).
   IK as a v1.x sibling provider lands separately under
   `goodnet-security-noise-ik`.
