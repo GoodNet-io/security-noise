@@ -12,25 +12,25 @@ dlopen) · **License**: GPL-2.0 with Linking Exception (see `LICENSE`)
 
 ## Build
 
-In-tree, alongside the kernel:
+This plugin lives in its own git with a flake that pulls the
+kernel SDK as a Nix input (libsodium on the build path). From
+this checkout:
 
 ```sh
-nix build .#goodnet-security-noise
-# result/lib/goodnet/plugins/libgoodnet_security_noise.so
+nix run .#build         # release build of libgoodnet_security_noise.so
+nix run .#test          # vanilla ctest (handshake, transport, rekey)
+nix run .#test-asan     # AddressSanitizer + UBSan
+nix run .#test-tsan     # ThreadSanitizer
 ```
 
-Standalone, against an installed kernel SDK (libsodium on PATH):
-
-```sh
-cd plugins/security/noise
-cmake -B build -DCMAKE_PREFIX_PATH=/usr/local -DBUILD_TESTING=OFF
-cmake --build build
-```
+The kernel monorepo also builds this plugin in-tree through its
+own `nix run .#build -- release` — operator install consumes
+every bundled `.so` from there.
 
 ## Load
 
 Manifest entry pins the SHA-256 digest; `gn_plugin_init` registers
-the `noise` provider. See `docs/install.md` and
+the `noise` provider. See `docs/install.en.md` and
 `docs/contracts/plugin-manifest.en.md` in the kernel tree.
 
 ## Contract
