@@ -37,25 +37,39 @@ struct Keypair {
 /// Generate a fresh X25519 keypair using libsodium's CSPRNG.
 [[nodiscard]] Keypair generate_keypair();
 
-/// Pattern selector. v1 ships the XX pattern only; the enum is kept
-/// as a single-value bag so a v1.1 sibling provider can extend it
-/// without an ABI break in the noise plugin's public surface.
+/// Pattern selector. The state machine shares every crypto
+/// primitive across patterns (DH = X25519, AEAD = ChaChaPoly,
+/// hash = BLAKE2b); only the per-step token sequence differs.
+/// Adding a new pattern requires a new enum value, a row in
+/// `protocol_name`, and switch arms in `write_message` /
+/// `read_message`.
 enum class Pattern : std::uint8_t {
-    XX = 0,  ///< unknown peer, three-message mutual auth
+    XX = 0,  ///< unknown peer; 3 messages: e / e,ee,s,es / s,se
+    IK = 1,  ///< initiator pre-knows responder's static pk;
+             ///< 2 messages: e,es,s,ss / e,ee,se. One RTT vs XX's
+             ///< two — same forward secrecy, faster reconnect for
+             ///< peers whose static pk the operator already has.
 };
 
 /// On-wire protocol-name strings — pinned by the contract.
 [[nodiscard]] const char* protocol_name(Pattern p) noexcept;
 
+/// Total number of pattern messages per Pattern. Plugins consult
+/// this to know when `is_complete()` will flip.
+[[nodiscard]] int pattern_total_steps(Pattern p) noexcept;
+
 class HandshakeState {
 public:
-    /// Construct a fresh XX handshake. The pattern parameter is
-    /// passed verbatim through to `protocol_name()` and is required
-    /// to be `Pattern::XX`; future patterns ship as a separate
-    /// provider plugin per `plugins/security/noise/docs/handshake.md` §1.
+    /// Construct a fresh handshake of the given pattern. `static_keys`
+    /// is always required (the local long-term identity).
+    /// `pre_known_rs` is only meaningful for `Pattern::IK` on the
+    /// **initiator** side — IK's first message is encrypted under a
+    /// DH that requires the responder's static pk up front. For XX
+    /// and for the IK responder side, pass `nullptr`.
     HandshakeState(Pattern pattern,
                     bool initiator,
-                    const Keypair& static_keys);
+                    const Keypair& static_keys,
+                    const PublicKey* pre_known_rs = nullptr);
 
     HandshakeState(const HandshakeState&)            = delete;
     HandshakeState& operator=(const HandshakeState&) = delete;

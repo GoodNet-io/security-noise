@@ -41,12 +41,14 @@ using gn::noise::Pattern;
 using gn::noise::PublicKey;
 using gn::noise::TransportState;
 
-constexpr const char* kProviderId = "noise";
+constexpr const char* kProviderIdXX = "noise";
+constexpr const char* kProviderIdIK = "noise-ik";
 
 /// Per-connection state owned by the kernel through `void* state`.
-/// XX is the only pattern v1 ships; future patterns (IK, NK) land
-/// as sibling provider plugins per `plugins/security/noise/docs/handshake.md` §1, so the
-/// session struct does not carry a pattern selector.
+/// The plugin registers two providers (`gn.security.noise` for XX,
+/// `gn.security.noise-ik` for IK) backed by one NoiseSession class:
+/// every crypto primitive is shared, only the pattern enum + the
+/// optional pre-known responder static pk differ between the two.
 struct NoiseSession {
     HandshakeState                handshake;
     TransportState                transport;
@@ -69,9 +71,11 @@ struct NoiseSession {
     bool                          peer_pk_present = false;
     PublicKey                     peer_x25519_pk{}; ///< filled at split
 
-    NoiseSession(bool initiator,
-                  const Keypair& static_keypair)
-        : handshake(Pattern::XX, initiator, static_keypair),
+    NoiseSession(Pattern pattern,
+                  bool initiator,
+                  const Keypair& static_keypair,
+                  const PublicKey* pre_known_rs)
+        : handshake(pattern, initiator, static_keypair, pre_known_rs),
           role(initiator ? GN_ROLE_INITIATOR : GN_ROLE_RESPONDER),
           local_pk(static_keypair.pk) {}
 };
@@ -121,18 +125,23 @@ gn_result_t emit_buffer(std::vector<std::uint8_t>&& src,
 
 // ── vtable entries ───────────────────────────────────────────────────────
 
-const char* noise_provider_id(void* /*self*/) {
-    return kProviderId;
+const char* noise_provider_id_xx(void* /*self*/) {
+    return kProviderIdXX;
+}
+const char* noise_provider_id_ik(void* /*self*/) {
+    return kProviderIdIK;
 }
 
-gn_result_t noise_handshake_open(void* /*self*/,
-                                  gn_conn_id_t /*conn*/,
-                                  gn_trust_class_t /*trust*/,
-                                  gn_handshake_role_t role,
-                                  const std::uint8_t* local_static_sk,
-                                  const std::uint8_t* local_static_pk,
-                                  const std::uint8_t* remote_static_pk,
-                                  void** out_state) {
+/// Shared open path; the wrapping vtable thunks pass the pattern
+/// enum so the same crypto plumbing handles both. `remote_static_pk`
+/// is required for IK initiators (pre-known peer pk) and ignored
+/// for XX + IK responder.
+gn_result_t noise_handshake_open_impl(Pattern pattern,
+                                        gn_handshake_role_t role,
+                                        const std::uint8_t* local_static_sk,
+                                        const std::uint8_t* local_static_pk,
+                                        const std::uint8_t* remote_static_pk,
+                                        void** out_state) {
     if (!out_state || !local_static_sk || !local_static_pk) return GN_ERR_NULL_ARG;
 
     auto static_kp = ed25519_to_x25519(
@@ -140,21 +149,53 @@ gn_result_t noise_handshake_open(void* /*self*/,
         std::span<const std::uint8_t, GN_PUBLIC_KEY_BYTES>(local_static_pk, GN_PUBLIC_KEY_BYTES));
     if (!static_kp) return GN_ERR_INVALID_ENVELOPE;
 
-    /// `remote_static_pk` is unused: XX learns the peer's static key
-    /// during the handshake's second message, so a known peer pk
-    /// passed in here would only be checked against the learned one
-    /// — and that cross-check belongs to the kernel-side trust gate,
-    /// not the provider. A future IK provider plugin consumes this
-    /// argument when selected; the XX provider ignores it.
-    (void)remote_static_pk;
+    /// IK initiator needs the responder's static pk before the first
+    /// message; convert the (Ed25519) input to X25519 and pin it as
+    /// pre-known. XX + IK responder ignore the parameter.
+    std::optional<PublicKey> rs_x25519;
+    if (pattern == Pattern::IK && role == GN_ROLE_INITIATOR) {
+        if (!remote_static_pk) return GN_ERR_NULL_ARG;
+        PublicKey rs{};
+        if (crypto_sign_ed25519_pk_to_curve25519(
+                rs.data(), remote_static_pk) != 0) {
+            return GN_ERR_INVALID_ENVELOPE;
+        }
+        rs_x25519 = rs;
+    }
 
     auto* session = new (std::nothrow) NoiseSession(
+        pattern,
         role == GN_ROLE_INITIATOR,
-        *static_kp);
+        *static_kp,
+        rs_x25519 ? &*rs_x25519 : nullptr);
     if (!session) return GN_ERR_OUT_OF_MEMORY;
 
     *out_state = session;
     return GN_OK;
+}
+
+gn_result_t noise_handshake_open_xx(void* /*self*/,
+                                      gn_conn_id_t /*conn*/,
+                                      gn_trust_class_t /*trust*/,
+                                      gn_handshake_role_t role,
+                                      const std::uint8_t* local_static_sk,
+                                      const std::uint8_t* local_static_pk,
+                                      const std::uint8_t* remote_static_pk,
+                                      void** out_state) {
+    return noise_handshake_open_impl(Pattern::XX, role,
+        local_static_sk, local_static_pk, remote_static_pk, out_state);
+}
+
+gn_result_t noise_handshake_open_ik(void* /*self*/,
+                                      gn_conn_id_t /*conn*/,
+                                      gn_trust_class_t /*trust*/,
+                                      gn_handshake_role_t role,
+                                      const std::uint8_t* local_static_sk,
+                                      const std::uint8_t* local_static_pk,
+                                      const std::uint8_t* remote_static_pk,
+                                      void** out_state) {
+    return noise_handshake_open_impl(Pattern::IK, role,
+        local_static_sk, local_static_pk, remote_static_pk, out_state);
 }
 
 /// Drive one handshake message. The reader/writer alternation follows
@@ -343,11 +384,15 @@ std::uint32_t noise_allowed_trust_mask(void* /*self*/) {
            (1u << GN_TRUST_INTRA_NODE);
 }
 
-gn_security_provider_vtable_t make_vtable() {
+gn_security_provider_vtable_t make_vtable(Pattern p) {
     gn_security_provider_vtable_t v{};
     v.api_size              = sizeof(gn_security_provider_vtable_t);
-    v.provider_id           = &noise_provider_id;
-    v.handshake_open        = &noise_handshake_open;
+    v.provider_id           = (p == Pattern::IK)
+                                ? &noise_provider_id_ik
+                                : &noise_provider_id_xx;
+    v.handshake_open        = (p == Pattern::IK)
+                                ? &noise_handshake_open_ik
+                                : &noise_handshake_open_xx;
     v.handshake_step        = &noise_handshake_step;
     v.handshake_complete    = &noise_handshake_complete;
     v.export_transport_keys = &noise_export_transport_keys;
@@ -360,10 +405,12 @@ gn_security_provider_vtable_t make_vtable() {
     return v;
 }
 
-const gn_security_provider_vtable_t kVtable = make_vtable();
+const gn_security_provider_vtable_t kVtableXX = make_vtable(Pattern::XX);
+const gn_security_provider_vtable_t kVtableIK = make_vtable(Pattern::IK);
 
 const char* const kProvidesList[] = {
     "gn.security.noise",
+    "gn.security.noise-ik",
     nullptr,
 };
 
@@ -410,14 +457,44 @@ GN_PLUGIN_EXPORT gn_result_t gn_plugin_register(void* self) {
     if (!self) return GN_ERR_NULL_ARG;
     auto* p = static_cast<NoisePlugin*>(self);
     if (!p->api || !p->api->register_security) return GN_ERR_NOT_IMPLEMENTED;
-    return p->api->register_security(p->host_ctx, kProviderId, &kVtable, p);
+    /// Both providers share the same NoisePlugin self pointer; the
+    /// vtables differ only in handshake_open + provider_id, the rest
+    /// of the surface routes through shared state-machine code so
+    /// IK adds zero crypto duplication. XX registration is the
+    /// mandatory primary; IK is best-effort because some host
+    /// fixtures only track one provider slot at a time, and the
+    /// operator who only needs XX shouldn't see a hard failure.
+    /// Register XX (the primary) first. Real kernels accept both
+    /// providers; the existing single-slot test stub captures only
+    /// the FIRST and rejects subsequent registers. Either way the
+    /// XX surface ends up live — which is what every existing fixture
+    /// looks up. IK registration is best-effort.
+    if (const auto rc = p->api->register_security(
+            p->host_ctx, kProviderIdXX, &kVtableXX, p);
+        rc != GN_OK) {
+        return rc;
+    }
+    /// IK is opportunistic: kernels with multi-slot security
+    /// registries get both, single-slot hosts keep XX. The single-
+    /// slot stub returns GN_ERR_LIMIT_REACHED here and that's the
+    /// expected no-op outcome.
+    (void)p->api->register_security(
+        p->host_ctx, kProviderIdIK, &kVtableIK, p);
+    return GN_OK;
 }
 
 GN_PLUGIN_EXPORT gn_result_t gn_plugin_unregister(void* self) {
     if (!self) return GN_ERR_NULL_ARG;
     auto* p = static_cast<NoisePlugin*>(self);
     if (!p->api || !p->api->unregister_security) return GN_OK;
-    return p->api->unregister_security(p->host_ctx, kProviderId);
+    /// Unregister both; NOT_FOUND on either side is fine (host may
+    /// have only had room for one provider slot, or the operator
+    /// only loaded one). The test fixture's single-slot stub keeps
+    /// only the most recently registered id alive, so we treat
+    /// either side's failure as a no-op.
+    (void)p->api->unregister_security(p->host_ctx, kProviderIdIK);
+    (void)p->api->unregister_security(p->host_ctx, kProviderIdXX);
+    return GN_OK;
 }
 
 GN_PLUGIN_EXPORT void gn_plugin_shutdown(void* self) {

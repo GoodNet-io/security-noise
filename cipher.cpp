@@ -3,6 +3,7 @@
 
 #include <sodium.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -64,6 +65,18 @@ CipherState::encrypt_with_ad(std::span<const std::uint8_t> ad,
     /// 2^64-1 messages per direction per key — at any realistic
     /// rate the bound is unreachable, but the check costs nothing.
     if (n_ == std::numeric_limits<std::uint64_t>::max()) {
+        /// Pre-abort breadcrumb on stderr — CipherState is a pure
+        /// crypto primitive with no host_api handle, so we cannot
+        /// reach the kernel log vtable. Without this print line the
+        /// process dies with bare SIGABRT and operators have no clue
+        /// why; a single fprintf is justified for an event that
+        /// terminates the process.
+        std::fprintf(stderr,
+            "[noise] cipher.cpp:%d FATAL: encrypt nonce wrap "
+            "(2^64-1 messages on one direction); aborting to prevent "
+            "(key, nonce) reuse. Caller should have triggered REKEY "
+            "well before this point — see handshake.md §4.\n",
+            __LINE__);
         std::abort();
     }
     std::uint8_t nonce[AEAD_NONCE_BYTES];
@@ -97,6 +110,13 @@ CipherState::decrypt_with_ad(std::span<const std::uint8_t> ad,
     /// (each direction has its own `CipherState`), so abusing a
     /// nonce here is just as catastrophic as on the encrypt side.
     if (n_ == std::numeric_limits<std::uint64_t>::max()) {
+        std::fprintf(stderr,
+            "[noise] cipher.cpp:%d FATAL: decrypt nonce wrap "
+            "(2^64-1 messages on one direction); aborting to prevent "
+            "(key, nonce) reuse. Indicates either no REKEY happened "
+            "or an active attack stuffing the channel — see "
+            "handshake.md §4.\n",
+            __LINE__);
         std::abort();
     }
     std::uint8_t nonce[AEAD_NONCE_BYTES];

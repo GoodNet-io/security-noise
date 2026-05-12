@@ -14,6 +14,7 @@ namespace gn::noise {
 namespace {
 
 constexpr int xx_total_steps = 3;
+constexpr int ik_total_steps = 2;
 
 /// Domain-separation prologue mixed in immediately after symmetric
 /// initialisation per Noise §6.5. Binds the handshake transcript to
@@ -51,22 +52,58 @@ Keypair generate_keypair() {
 const char* protocol_name(Pattern p) noexcept {
     switch (p) {
         case Pattern::XX: return "Noise_XX_25519_ChaChaPoly_BLAKE2b";
+        case Pattern::IK: return "Noise_IK_25519_ChaChaPoly_BLAKE2b";
     }
     return "";
 }
 
+int pattern_total_steps(Pattern p) noexcept {
+    switch (p) {
+        case Pattern::XX: return xx_total_steps;
+        case Pattern::IK: return ik_total_steps;
+    }
+    return 0;
+}
+
 HandshakeState::HandshakeState(Pattern pattern,
                                 bool initiator,
-                                const Keypair& static_keys)
+                                const Keypair& static_keys,
+                                const PublicKey* pre_known_rs)
     : pattern_(pattern),
       initiator_(initiator),
-      steps_total_(xx_total_steps),
+      steps_total_(pattern_total_steps(pattern)),
       s_sk_(static_keys.sk),
       s_pk_(static_keys.pk) {
     symmetric_.initialize(protocol_name(pattern));
     symmetric_.mix_hash(std::span<const std::uint8_t>(
         reinterpret_cast<const std::uint8_t*>(kPrologue.data()),
         kPrologue.size()));
+
+    /// Noise IK pre-message hashing. Both sides hash the responder's
+    /// static pk into the symmetric state before any wire bytes flow
+    /// because the pattern's notation lists `<- s` as a pre-message
+    /// (Noise spec §7.4). Initiator: rs comes from the caller. Both
+    /// sides on responder + initiator must hash the same value or
+    /// the handshake hashes diverge and AEAD verification fails on
+    /// message 1.
+    if (pattern == Pattern::IK) {
+        if (initiator) {
+            /// Initiator: caller supplies the responder's static pk
+            /// via pre_known_rs. Storing rs_ + rs_known_ here lets
+            /// the message-emit path mix DH(es, ss) against it.
+            if (pre_known_rs) {
+                rs_       = *pre_known_rs;
+                rs_known_ = true;
+                symmetric_.mix_hash(std::span<const std::uint8_t>(
+                    rs_.data(), DH_PUBLIC_KEY_BYTES));
+            }
+        } else {
+            /// Responder: the "responder static pk" is OUR static
+            /// pk; hash s_pk into the state for the pre-message.
+            symmetric_.mix_hash(std::span<const std::uint8_t>(
+                s_pk_.data(), DH_PUBLIC_KEY_BYTES));
+        }
+    }
 }
 
 HandshakeState::~HandshakeState() {
@@ -179,24 +216,47 @@ HandshakeState::write_message(std::span<const std::uint8_t> payload) {
 
     switch (step_) {
         case 0: {
-            // -> e
-            write_e();
-            encrypt_payload();
+            if (pattern_ == Pattern::IK) {
+                /// IK msg 1 (initiator): e, es, s, ss + payload.
+                /// rs_ is the responder's pre-known static pk from
+                /// the ctor.
+                write_e();
+                if (!mix_dh(e_sk_, rs_)) return std::nullopt;       // es
+                encrypt_static();                                   // s
+                if (!mix_dh(s_sk_, rs_)) return std::nullopt;       // ss
+                encrypt_payload();
+            } else {
+                // XX msg 1: -> e
+                write_e();
+                encrypt_payload();
+            }
             break;
         }
         case 1: {
-            // <- e, ee, s, es
-            write_e();
-            if (!mix_dh(e_sk_, re_)) return std::nullopt;          // ee
-            encrypt_static();                                      // s
-            if (!mix_dh(s_sk_, re_)) return std::nullopt;          // es (responder)
-            encrypt_payload();
+            if (pattern_ == Pattern::IK) {
+                /// IK msg 2 (responder): e, ee, se + payload.
+                /// `se` from responder's POV uses local static sk
+                /// against peer ephemeral pk (re_).
+                write_e();
+                if (!mix_dh(e_sk_, re_)) return std::nullopt;       // ee
+                if (!mix_dh(s_sk_, re_)) return std::nullopt;       // se
+                encrypt_payload();
+            } else {
+                // XX msg 2: <- e, ee, s, es
+                write_e();
+                if (!mix_dh(e_sk_, re_)) return std::nullopt;       // ee
+                encrypt_static();                                   // s
+                if (!mix_dh(s_sk_, re_)) return std::nullopt;       // es
+                encrypt_payload();
+            }
             break;
         }
         case 2: {
-            // -> s, se
-            encrypt_static();                                      // s
-            if (!mix_dh(s_sk_, re_)) return std::nullopt;          // se (initiator)
+            /// XX-only message 3. IK terminates at step 2 so this
+            /// case never runs for IK (steps_total_ guard rejects
+            /// the call before we reach the switch).
+            encrypt_static();                                       // s
+            if (!mix_dh(s_sk_, re_)) return std::nullopt;           // se
             encrypt_payload();
             break;
         }
@@ -245,22 +305,45 @@ HandshakeState::read_message(std::span<const std::uint8_t> message) {
 
     switch (step_) {
         case 0: {
-            // -> e
-            if (!read_e()) return std::nullopt;
+            if (pattern_ == Pattern::IK) {
+                /// IK msg 1 (responder reads): e, es, s, ss +
+                /// payload. Responder uses own s against initiator's
+                /// e for `es`; learns initiator's rs from the
+                /// encrypted-static field, then DHs ss.
+                if (!read_e()) return std::nullopt;
+                if (!mix_dh(s_sk_, re_)) return std::nullopt;       // es
+                if (!read_encrypted_static()) return std::nullopt;  // s
+                if (!mix_dh(s_sk_, rs_)) return std::nullopt;       // ss
+            } else {
+                // XX msg 1: -> e
+                if (!read_e()) return std::nullopt;
+            }
             break;
         }
         case 1: {
-            // <- e, ee, s, es
-            if (!read_e()) return std::nullopt;
-            if (!mix_dh(e_sk_, re_)) return std::nullopt;          // ee
-            if (!read_encrypted_static()) return std::nullopt;     // s
-            if (!mix_dh(e_sk_, rs_)) return std::nullopt;          // es (initiator)
+            if (pattern_ == Pattern::IK) {
+                /// IK msg 2 (initiator reads): e, ee, se. `se` from
+                /// initiator's POV uses local ephemeral sk against
+                /// responder's pre-known static pk (rs_, set in
+                /// ctor) — but the responder used local static sk
+                /// vs peer ephemeral pk on the send side. The
+                /// shared secret is symmetric.
+                if (!read_e()) return std::nullopt;
+                if (!mix_dh(e_sk_, re_)) return std::nullopt;       // ee
+                if (!mix_dh(e_sk_, rs_)) return std::nullopt;       // se
+            } else {
+                // XX msg 2: <- e, ee, s, es
+                if (!read_e()) return std::nullopt;
+                if (!mix_dh(e_sk_, re_)) return std::nullopt;       // ee
+                if (!read_encrypted_static()) return std::nullopt;  // s
+                if (!mix_dh(e_sk_, rs_)) return std::nullopt;       // es
+            }
             break;
         }
         case 2: {
-            // -> s, se
-            if (!read_encrypted_static()) return std::nullopt;     // s
-            if (!mix_dh(e_sk_, rs_)) return std::nullopt;          // se (responder)
+            // XX msg 3: -> s, se
+            if (!read_encrypted_static()) return std::nullopt;      // s
+            if (!mix_dh(e_sk_, rs_)) return std::nullopt;           // se
             break;
         }
         default: return std::nullopt;

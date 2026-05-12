@@ -251,13 +251,17 @@ TEST(NoiseCipherDeath, AbortsOnCounterAtMax) {
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     CipherKey k;
     k.fill(0xAA);
+    /// Pre-abort stderr breadcrumb must surface in the death output —
+    /// without it operators get bare SIGABRT and no clue why crypto
+    /// killed the process. Pattern matches the FATAL prefix; the
+    /// surrounding text may evolve, so we anchor on the leader.
     EXPECT_DEATH({
         CipherState cs;
         cs.initialize_key(k);
         cs.test_set_nonce(std::numeric_limits<std::uint64_t>::max());
         (void)cs.encrypt_with_ad(std::span<const std::uint8_t>{},
                                   bytes_of("never"));
-    }, "");
+    }, "noise.*FATAL: encrypt nonce wrap");
     EXPECT_DEATH({
         CipherState cs;
         cs.initialize_key(k);
@@ -265,7 +269,7 @@ TEST(NoiseCipherDeath, AbortsOnCounterAtMax) {
         std::uint8_t ct[AEAD_TAG_BYTES] = {};
         (void)cs.decrypt_with_ad(std::span<const std::uint8_t>{},
                                   std::span<const std::uint8_t>(ct, sizeof(ct)));
-    }, "");
+    }, "noise.*FATAL: decrypt nonce wrap");
 }
 
 TEST(NoiseCipher, RekeyChangesKey) {

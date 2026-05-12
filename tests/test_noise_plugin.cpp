@@ -21,6 +21,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
@@ -103,11 +104,23 @@ NoisePluginHandle load_plugin() {
 }
 
 struct CapturedRegistration {
+    /// Most-recent provider id (kept for legacy single-slot tests).
     std::string                                provider_id;
     const gn_security_provider_vtable_t*       vtable      = nullptr;
     void*                                      self        = nullptr;
+    /// Multi-slot map — the noise plugin registers both "noise"
+    /// (XX) and "noise-ik" (IK) under one plugin_register call;
+    /// tests look up the one they care about by id.
+    std::unordered_map<std::string,
+        const gn_security_provider_vtable_t*>  vtables_by_id;
     int                                        register_calls   = 0;
     int                                        unregister_calls = 0;
+
+    [[nodiscard]] const gn_security_provider_vtable_t*
+    vtable_for(const std::string& id) const noexcept {
+        auto it = vtables_by_id.find(id);
+        return it == vtables_by_id.end() ? nullptr : it->second;
+    }
 };
 
 CapturedRegistration g_captured;
@@ -120,6 +133,7 @@ gn_result_t stub_register_security(void* /*host_ctx*/,
     g_captured.provider_id = provider_id;
     g_captured.vtable      = vtable;
     g_captured.self        = self;
+    g_captured.vtables_by_id[provider_id] = vtable;
     ++g_captured.register_calls;
     return GN_OK;
 }
@@ -127,10 +141,14 @@ gn_result_t stub_register_security(void* /*host_ctx*/,
 gn_result_t stub_unregister_security(void* /*host_ctx*/,
                                      const char* provider_id) {
     if (!provider_id) return GN_ERR_NULL_ARG;
-    if (g_captured.provider_id != provider_id) return GN_ERR_NOT_FOUND;
-    g_captured.provider_id.clear();
-    g_captured.vtable = nullptr;
-    g_captured.self   = nullptr;
+    const auto it = g_captured.vtables_by_id.find(provider_id);
+    if (it == g_captured.vtables_by_id.end()) return GN_ERR_NOT_FOUND;
+    g_captured.vtables_by_id.erase(it);
+    if (g_captured.provider_id == provider_id) {
+        g_captured.provider_id.clear();
+        g_captured.vtable = nullptr;
+        g_captured.self   = nullptr;
+    }
     ++g_captured.unregister_calls;
     return GN_OK;
 }
@@ -190,7 +208,11 @@ protected:
         ASSERT_EQ(plugin_.plugin_init(&api_, &plugin_self_), GN_OK);
         ASSERT_NE(plugin_self_, nullptr);
         ASSERT_EQ(plugin_.plugin_reg(plugin_self_), GN_OK);
-        vtable_ = g_captured.vtable;
+        /// Tests target the XX provider (the canonical "noise" id);
+        /// the plugin also registers IK on top, but the existing
+        /// test suite predates that addition and asserts XX shape.
+        vtable_ = g_captured.vtable_for("noise");
+        if (!vtable_) vtable_ = g_captured.vtable;
         ASSERT_NE(vtable_, nullptr);
     }
 
