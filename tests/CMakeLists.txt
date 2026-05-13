@@ -8,6 +8,7 @@ include(GoogleTest)
 add_executable(test_noise
     test_noise.cpp
     test_noise_cipher_property.cpp
+    test_noise_ik.cpp
     test_noise_transport.cpp)
 target_link_libraries(test_noise PRIVATE
     GoodNet::sdk
