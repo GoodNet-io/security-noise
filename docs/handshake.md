@@ -26,7 +26,7 @@ A v1.1 sibling provider (`noise-ik`) registers under a distinct
 `provider_id` and adds the `Noise_IK_25519_ChaChaPoly_BLAKE2b`
 pattern for the initiator-knows-peer-pk case. Selection between
 providers happens through `register_security` per
-`docs/contracts/security-trust.md`, not through a runtime selector inside this
+`docs/contracts/security-trust.en.md`, not through a runtime selector inside this
 provider's vtable.
 
 ## 1a. Prologue (domain separation)
@@ -251,7 +251,7 @@ typedef struct gn_handshake_keys_s {
 | `initial_recv_nonce` | u64 | first nonce the inline-crypto path expects on receive |
 | `handshake_hash` | 32 bytes | channel-binding (BLAKE2b-256 over the symmetric-state `h` per §2); attestation §2 binds against this value |
 | `peer_static_pk` | 32 bytes | peer's Ed25519 public key learned during handshake; the kernel uses it for routing decisions and trust upgrade |
-| `_reserved[4]` | 32 bytes | NULL on init; size-prefix evolution per `abi-evolution.md` §4 |
+| `_reserved[4]` | 32 bytes | NULL on init; size-prefix evolution per `abi-evolution.en.md` §4 |
 
 ## 6. Nonce initialisation
 
@@ -365,14 +365,14 @@ After a successful Noise handshake:
 
 1. The transport called `host_api->notify_connect` at the moment
    the socket established, with `trust` derived from the address
-   (per `docs/contracts/link.md` §3 — `Loopback` for `127.0.0.1`/`::1`/
+   (per `docs/contracts/link.en.md` §3 — `Loopback` for `127.0.0.1`/`::1`/
    AF_UNIX, `Untrusted` for public). Trust class **stays
    `Untrusted`** when the handshake reaches the Transport phase —
    completing the cryptographic handshake proves the peer holds
    the static key but not that the kernel should treat the peer
    as a `Peer`-class participant. The promotion to `Peer` is
    gated by the attestation dual-flag protocol per
-   `docs/contracts/attestation.md` §6, which fires after both sides exchange a
+   `docs/contracts/attestation.en.md` §6, which fires after both sides exchange a
    valid attestation envelope; `Loopback` and `IntraNode`
    connections never upgrade — `gn_trust_can_upgrade` in
    `sdk/trust.h` refuses any other transition.
@@ -388,6 +388,6 @@ fail to authenticate any frame signed with a different static.
 
 ## 9. Cross-references
 
-- TrustClass policy that gates this provider's use: `docs/contracts/security-trust.md`.
+- TrustClass policy that gates this provider's use: `docs/contracts/security-trust.en.md`.
 - Frame layout that wraps Noise output: `plugins/protocols/gnet/docs/wire-format.md`.
-- Handshake buffer ownership annotation: `docs/contracts/abi-evolution.md` §6.
+- Handshake buffer ownership annotation: `docs/contracts/abi-evolution.en.md` §6.

@@ -375,7 +375,7 @@ void noise_destroy(void* /*self*/) {}
 
 /// Noise provider authenticates and encrypts every direction; safe
 /// on every trust class. The kernel may still choose `null+raw` on
-/// loopback when latency matters (per `security-trust.md` §4 default
+/// loopback when latency matters (per `security-trust.en.md` §4 default
 /// stacks); the mask declares capability, not policy.
 std::uint32_t noise_allowed_trust_mask(void* /*self*/) {
     return (1u << GN_TRUST_UNTRUSTED) |
