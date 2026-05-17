@@ -304,10 +304,10 @@ TEST_F(NoisePluginTest, XxHandshakeReachesTransportPhase) {
     EXPECT_EQ(std::memcmp(alice_keys.handshake_hash, bob_keys.handshake_hash,
                            GN_HASH_BYTES), 0);
 
-    /// Sanity: the exported cipher keys are non-zero. Pre-fix the
-    /// noise provider zeroed the slot; post-fix the kernel-side
-    /// InlineCrypto seeds from these bytes per
-    /// `plugins/security/noise/docs/handshake.md` §6.
+    /// Sanity: the exported cipher keys are non-zero. The
+    /// kernel-side InlineCrypto seeds from these bytes per
+    /// `plugins/security/noise/docs/handshake.md` §6, so a
+    /// zeroed slot would silently downgrade fast-path crypto.
     std::uint8_t key_acc = 0;
     for (std::size_t i = 0; i < GN_CIPHER_KEY_BYTES; ++i) {
         key_acc |= alice_keys.send_cipher_key[i];
