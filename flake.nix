@@ -7,7 +7,7 @@
 # `nixpkgs` follows the kernel's pin so a single nixpkgs bump in the
 # monorepo propagates to every plugin instead of every plugin owning
 # its own pin and drifting independently. Switch `inputs.goodnet.url`
-# from `path:../../..` to `github:goodnet-io/kernel?ref=…` once the
+# from `path:../../..` to `github:GoodNet-io/goodnet?ref=…` once the
 # kernel extracts to its own repository — the rest stays unchanged.
 #
 # goodnet-standalone-plugin: noise
