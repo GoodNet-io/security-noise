@@ -246,7 +246,7 @@ TEST(NoiseCipherDeath, AbortsOnCounterAtMax) {
     /// path exists in the wire protocol — so the cipher
     /// aborts before the next `crypto_aead_*` call.
     /// `test_set_nonce` is the in-tree test hatch on
-    /// `cipher.hpp:63`; production code never reaches the
+    /// `cipher.hpp`; production code never reaches the
     /// 2^64 ceiling at any realistic message rate.
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     CipherKey k;
