@@ -38,5 +38,5 @@ the `noise` provider. See `docs/install.en.md` and
 - Wire format + handshake spec: [`docs/handshake.md`](docs/handshake.md)
 - Kernel-side trust-class policy: `docs/contracts/security-trust.en.md`
 - Pattern: Noise XX (mutual auth, no preshared peer pk).
-  IK as a v1.x sibling provider lands separately under
+  IK is planned as a sibling provider under
   `goodnet-security-noise-ik`.
