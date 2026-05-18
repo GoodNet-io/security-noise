@@ -339,8 +339,7 @@ authentication, the kernel tears the connection down, and the
 peer reconnects through a fresh handshake. A future provider
 extension that targets UDP-class transports must dedup at the
 frame layer (separate replay window per security session) before
-reaching the AEAD; that work is deferred to v1.1 and tracked in
-the rc1 release notes.
+reaching the AEAD; that work is planned.
 
 ---
 
