@@ -22,12 +22,12 @@ The protocol name string is the **on-wire** name; the implementation
 actual hash function produces wire-incompatible peers — no external
 Noise stack will interoperate.
 
-A v1.1 sibling provider (`noise-ik`) registers under a distinct
+A planned sibling provider (`noise-ik`) registers under a distinct
 `provider_id` and adds the `Noise_IK_25519_ChaChaPoly_BLAKE2b`
 pattern for the initiator-knows-peer-pk case. Selection between
 providers happens through `register_security` per
-`docs/contracts/security-trust.en.md`, not through a runtime selector inside this
-provider's vtable.
+`docs/contracts/security-trust.en.md`, not through a runtime selector
+inside this provider's vtable.
 
 ## 1a. Prologue (domain separation)
 
