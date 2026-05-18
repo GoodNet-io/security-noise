@@ -11,7 +11,7 @@
 
 This contract pins the cryptographic surface of the canonical
 security provider: handshake pattern, hash function, buffer
-sizing, and rekey semantics. v1 ships one pattern:
+sizing, and rekey semantics. The plugin implements one pattern:
 
 | Pattern | When used | Identity |
 |---|---|---|
