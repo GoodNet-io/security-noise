@@ -415,13 +415,13 @@ const char* const kProvidesList[] = {
 };
 
 const gn_plugin_descriptor_t kDescriptor = {
-    /* name              */ "goodnet_security_noise",
-    /* version           */ "0.1.0",
-    /* hot_reload_safe   */ 0,  /// active sessions hold pointers into provider data
-    /* ext_requires      */ nullptr,
-    /* ext_provides      */ kProvidesList,
-    /* kind              */ GN_PLUGIN_KIND_SECURITY,
-    /* _reserved         */ {nullptr, nullptr, nullptr, nullptr},
+    .name            = "goodnet_security_noise",
+    .version         = "0.1.0",
+    .hot_reload_safe = 0,
+    .ext_requires    = nullptr,
+    .ext_provides    = kProvidesList,
+    .kind            = GN_PLUGIN_KIND_SECURITY,
+    .inject_targets  = nullptr,
 };
 
 struct NoisePlugin {
