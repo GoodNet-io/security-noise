@@ -6,6 +6,14 @@ versions track the kernel ABI through `gn_security_vtable_t`.
 
 ## [Unreleased]
 
+### `provides_flags` vtable slot
+
+Added `provides_flags` lambda to `make_vtable()` returning
+`GN_SEC_PROVIDES_E2E_ENCRYPTION | GN_SEC_PROVIDES_AUTHENTICATION |
+GN_SEC_PROVIDES_FORWARD_SECRECY`. The kernel uses this slot to
+advertise the security properties of an active session to upper
+layers without re-inspecting the provider name.
+
 ### IK pattern + isolated test suite
 
 The provider now exposes the Noise IK pattern as a light
