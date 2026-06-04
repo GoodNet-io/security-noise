@@ -402,6 +402,11 @@ gn_security_provider_vtable_t make_vtable(Pattern p) {
     v.handshake_close       = &noise_handshake_close;
     v.destroy               = &noise_destroy;
     v.allowed_trust_mask    = &noise_allowed_trust_mask;
+    v.provides_flags        = [](void*) noexcept -> std::uint32_t {
+        return GN_SEC_PROVIDES_E2E_ENCRYPTION |
+               GN_SEC_PROVIDES_AUTHENTICATION |
+               GN_SEC_PROVIDES_FORWARD_SECRECY;
+    };
     return v;
 }
 
