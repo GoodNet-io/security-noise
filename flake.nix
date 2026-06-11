@@ -15,7 +15,7 @@
   description = "GoodNet Noise XX security provider — standalone plugin flake.";
 
   inputs = {
-    goodnet.url     = "git+file:../../..?dir=nix/kernel-only";
+    goodnet.url     = "github:GoodNet-io/goodnet/dev?dir=nix/kernel-only";
     nixpkgs.follows = "goodnet/nixpkgs";
   };
 
